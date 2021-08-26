@@ -1,0 +1,103 @@
+##node-playbook.yml
+
+- hosts: all
+  become: true
+  tasks:
+  - name: Install packages that allow apt to be used over HTTPS
+    apt:
+      pkg:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg-agent
+      - software-properties-common
+
+  - name: Add an apt signing key for Docker
+    apt_key:
+      url: https://download.docker.com/linux/ubuntu/gpg
+      state: present
+
+  - name: Add apt repository for stable version
+    apt_repository:
+      repo: "deb [arch=amd64] https://download.docker.com/linux/{{ ansible_distribution|lower }} {{ ansible_distribution_release }} stable"
+      state: present
+      update_cache: yes
+
+
+  - name: Install docker and its dependecies
+    apt:
+      pkg:
+      - docker
+      - docker-compose
+      - docker-ce 
+      - docker-ce-cli 
+      - containerd.io
+    notify:
+      - docker status
+
+  - name: Add vagrant user to docker group
+    user:
+      name: vagrant
+      group: docker
+
+  - name: Remove swapfile from /etc/fstab
+    mount:
+      name: "{{ item }}"
+      fstype: swap
+      state: absent ##state prenesent, absent, restart 뜻 확인 필요
+    with_items:
+      - swap
+      - none
+
+  - name: Disable swap
+    command: swapoff -a
+    when: ansible_swaptotal_mb > 0
+  - name: Add an apt signing key for Kubernetes
+    apt_key:
+      url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+      state: present
+
+  - name: Adding apt repository for Kubernetes
+    apt_repository:
+      repo: deb https://apt.kubernetes.io/ kubernetes-xenial main
+      state: present
+      
+      filename: kubernetes
+      mode: 0600 ##추가
+
+  - name: Install Kubernetes binaries
+    apt: 
+      pkg:
+        - kubelet 
+        - kubeadm 
+        - kubectl
+      state: present
+
+  - name: Configure node ip
+    lineinfile:
+      path: /etc/default/kubelet
+      line: KUBELET_EXTRA_ARGS=--node-ip={{ node_ip }}
+      create: yes ##kubelet 경로 없음, 없는 경우 생성
+
+  - name: Restart kubelet
+    service:
+      name: kubelet
+      daemon_reload: yes
+      state: restarted
+
+  - name: Copy the join command to server location
+    become: yes
+    copy: src=join_command dest=/tmp/join_command.sh mode=0777
+      
+  
+  ##- name: Joining to the cluster
+    ##become: yes
+    ##shell: “{{ hostvars[‘kubemaster’][‘join_command’] }}”
+
+  - name: Join the node to cluster
+    command: sh /tmp/join_command.sh
+    register: joined_or_not
+
+  handlers:
+    - name: docker status
+      service: name=docker state=started

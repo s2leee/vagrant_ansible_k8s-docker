@@ -1,0 +1,55 @@
+##Vagrantfile
+
+IMAGE_NAME = "bento/ubuntu-18.04"
+N = 2
+
+Vagrant.configure("2") do |config|
+    config.ssh.insert_key = false
+    config.vm.box = "bento/ubuntu-18.04"
+
+    config.vm.provider "virtualbox" do |v|
+        v.memory = 2048 ##memory는 2GB 이상 권장, 1GB일 시 생성 이슈
+        v.cpus = 2
+
+        config.vm.provision "shell", inline: <<-SHELL
+        sudo apt-get update
+        sudo apt-get install apt-transport-https wget gnupg
+        sudo apt-get install software-properties-common
+        sudo apt-get install virtualbox-guest-utils ##virtualbox packages install
+        sudo apt-get install python-pip
+        sudo apt-add-repository --yes --update ppa:ansible/ansible ##ansible 버전 이슈
+        sudo apt-get install ansible --yes ##없어도 될듯
+      SHELL
+
+    end
+      
+    config.vm.define "k8s-master" do |master|
+        master.vm.box = "bento/ubuntu-18.04"
+        master.vm.network "private_network", ip: "192.168.56.40"
+        master.vm.hostname = "k8s-master"
+        master.vm.provision "ansible_local" do |ansible| ##ansible은 host, ansible_local은 guest
+            ansible.version = "2.9.24" ##ansible 버전 이슈로 버전 명시->ansible_local 변경 이후로는 상관 없을듯
+            ansible.install_mode = "pip" ##ansible 설치.. 윽
+            ansible.playbook = "master-playbook.yml"
+            ansible.extra_vars = {
+                node_ip: "192.168.56.40",
+            }
+        end
+    end
+
+    (1..N).each do |i|
+    config.vm.define "node-#{i}" do |node|
+        node.vm.box = "bento/ubuntu-18.04"
+        node.vm.network "private_network", ip: "192.168.56.#{i + 10}"
+        node.vm.hostname = "node-#{i}"
+        node.vm.provision "ansible_local" do |ansible|
+            ansible.version = "2.9.24"
+            ansible.install_mode = "pip"
+            ansible.playbook = "node-playbook.yml"
+            ansible.extra_vars = {
+                node_ip: "192.168.56.#{i + 10}",
+                }
+            end
+        end
+    end
+end
